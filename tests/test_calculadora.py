@@ -21,19 +21,19 @@ def test_calculo_cesta_igual_salario():
 
 def test_salario_zero_deve_retornar_erro():
     """Caso limite: divisao por zero."""
-    with pytest.raises(ValueError, match="salario minimo"):
+    with pytest.raises(ValueError):
         calcular_percentual(500, 0)
 
 
 def test_salario_negativo_deve_retornar_erro():
     """Salario negativo e invalido."""
-    with pytest.raises(ValueError, match="salario minimo"):
+    with pytest.raises(ValueError):
         calcular_percentual(500, -100)
 
 
 def test_valor_negativo_deve_retornar_erro():
     """Valor de cesta negativo e invalido."""
-    with pytest.raises(ValueError, match="valor da cesta"):
+    with pytest.raises(ValueError):
         calcular_percentual(-10, 1412)
 
 

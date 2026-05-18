@@ -1,31 +1,46 @@
 """
 Calculadora de Cesta Básica vs. Salário Mínimo.
 
-Permite ao usuário calcular quanto da renda é comprometido
-com a cesta básica e receber sugestões de ajuste.
+Etapa Intermediária do BootCamp:
+  - Mantém toda a lógica original da Etapa 1 (entrada de 15 itens,
+    cálculo de percentual, faixas de risco e sugestões de economia).
+  - ADICIONA integração com a API pública do Banco Central do Brasil:
+      * busca automática do salário mínimo vigente (série 1619)
+      * busca da inflação acumulada nos últimos 12 meses (série 433)
+  - O usuário pode optar por usar o salário oficial (vindo da API) ou
+    digitar um valor personalizado, mantendo a aplicação funcional
+    mesmo se a API estiver fora do ar.
 """
+from src.api_bcb import (
+    buscar_salario_minimo_atual,
+    buscar_inflacao_12_meses,
+    formatar_dados_bcb,
+    ApiBcbError,
+)
 
+
+# Itens da cesta básica (preços de referência apenas como sugestão)
 ITENS_CESTA = [
     "Arroz (5kg)",
     "Feijão (1kg)",
     "Óleo de soja (900ml)",
-    "Açúcar (5kg)",
-    "Leite (1L)",
+    "Açúcar (1kg)",
+    "Sal (1kg)",
     "Café (500g)",
-    "Farinha de trigo (1kg)",
-    "Macarrão (500g)",
+    "Leite (1L)",
     "Pão francês (1kg)",
+    "Manteiga (200g)",
     "Carne bovina (1kg)",
     "Frango (1kg)",
-    "Ovos (dúzia)",
-    "Banana (dúzia)",
+    "Ovos (1 dúzia)",
+    "Banana (1kg)",
     "Tomate (1kg)",
-    "Manteiga (200g)",
+    "Batata (1kg)",
 ]
 
 
 def calcular_percentual(valor_cesta, salario_minimo):
-    """Calcula o percentual do salário consumido pela cesta."""
+    """Calcula a porcentagem do salário comprometida pela cesta básica."""
     if salario_minimo <= 0:
         raise ValueError("O salário mínimo deve ser maior que zero.")
     if valor_cesta < 0:
@@ -35,99 +50,135 @@ def calcular_percentual(valor_cesta, salario_minimo):
     return round(percentual, 2)
 
 
-def gerar_sugestoes(itens_precos, salario_minimo, limite_percentual=30):
-    """Gera sugestões de corte caso a cesta ultrapasse o limite."""
-    valor_total = sum(itens_precos.values())
-    percentual = calcular_percentual(valor_total, salario_minimo)
+def classificar_risco(percentual):
+    """Classifica o percentual em faixas de risco."""
+    if percentual <= 20:
+        return ("🟢", "OK", "Excelente! O custo está bem controlado.")
+    if percentual <= 30:
+        return ("🟡", "ATENÇÃO", "O custo está no limite recomendado de 30%.")
+    return ("🔴", "CRÍTICO", "O custo ultrapassou 30% do salário — risco alto.")
 
-    if percentual <= limite_percentual:
+
+def gerar_sugestoes(itens, salario_minimo, limite_percentual=30):
+    """Gera sugestões dos itens mais caros para reduzir."""
+    valor_total = sum(itens.values())
+    if calcular_percentual(valor_total, salario_minimo) <= limite_percentual:
         return []
 
-    valor_limite = salario_minimo * (limite_percentual / 100)
-    excesso = valor_total - valor_limite
-
-    ordenados = sorted(itens_precos.items(), key=lambda x: x[1], reverse=True)
-
+    # Ordena os itens do mais caro para o mais barato
+    ordenados = sorted(itens.items(), key=lambda x: x[1], reverse=True)
     sugestoes = []
-    acumulado = 0
-    for item, preco in ordenados:
-        if acumulado >= excesso:
-            break
-        sugestoes.append(
-            f"  - Considere economizar em '{item}' (R$ {preco:.2f})"
-        )
-        acumulado += preco * 0.3  # supondo economia de 30% por item
-
+    for nome, preco in ordenados[:3]:
+        if preco > 0:
+            sugestoes.append(
+                f"Considere reduzir o gasto com '{nome}' (R$ {preco:.2f}). "
+                "Procure marcas mais baratas ou compre em maior quantidade."
+            )
     return sugestoes
 
 
-def ler_float(mensagem):
-    """Lê um valor float do usuário com tratamento de erro."""
-    while True:
-        try:
-            valor = float(input(mensagem))
-            if valor < 0:
-                print("  ⚠  O valor não pode ser negativo. Tente novamente.")
-                continue
-            return valor
-        except ValueError:
-            print("  ⚠  Entrada inválida. Digite um número válido.")
-
-
-def main():
-    """Função principal da interface CLI."""
-    print("=" * 55)
-    print("  CALCULADORA DE CESTA BÁSICA vs. SALÁRIO MÍNIMO")
-    print("=" * 55)
-    print()
-
-    salario = ler_float("Digite o valor do salário mínimo atual (R$): ")
-    if salario <= 0:
-        print("Erro: O salário mínimo deve ser maior que zero.")
-        return
-
-    print()
-    print("Agora, insira o preço de cada item da cesta básica.")
+def coletar_precos():
+    """Solicita ao usuário os preços de cada item da cesta."""
+    print("\nInsira o preço de cada item da cesta básica.")
     print("(Digite 0 para itens que não deseja incluir)")
     print("-" * 55)
 
-    itens_precos = {}
-    for item in ITENS_CESTA:
-        preco = ler_float(f"  {item}: R$ ")
-        if preco > 0:
-            itens_precos[item] = preco
+    itens = {}
+    for nome in ITENS_CESTA:
+        while True:
+            try:
+                entrada = input(f"  {nome}: R$ ").strip().replace(",", ".")
+                preco = float(entrada)
+                if preco < 0:
+                    print("  ⚠ Valor não pode ser negativo. Tente novamente.")
+                    continue
+                itens[nome] = preco
+                break
+            except ValueError:
+                print("  ⚠ Valor inválido. Digite um número.")
+    return itens
 
-    if not itens_precos:
-        print("\nNenhum item foi adicionado à cesta.")
-        return
 
-    valor_total = sum(itens_precos.values())
-    percentual = calcular_percentual(valor_total, salario)
+def obter_salario(usar_api=True):
+    """
+    Obtém o salário mínimo. Tenta primeiro a API do BCB; se falhar
+    (ou se o usuário recusar), pede o valor manualmente.
 
-    print()
+    Retorna uma tupla: (salario_float, fonte_str).
+    """
+    if usar_api:
+        try:
+            print("\n🌐 Consultando salário mínimo oficial no Banco Central...")
+            dados = buscar_salario_minimo_atual()
+            print(
+                f"✓ Salário mínimo vigente: R$ {dados['valor']:.2f} "
+                f"(referência: {dados['data']})"
+            )
+            usar = input("Usar este valor? [S/n] ").strip().lower()
+            if usar in ("", "s", "sim", "y", "yes"):
+                return dados["valor"], f"BCB ({dados['data']})"
+        except ApiBcbError as e:
+            print(f"⚠ Não foi possível consultar o BCB: {e}")
+            print("  Você pode informar o salário manualmente.")
+
+    # Fallback: usuário digita
+    while True:
+        try:
+            entrada = input(
+                "Digite o valor do salário mínimo (R$): "
+            ).strip().replace(",", ".")
+            valor = float(entrada)
+            if valor <= 0:
+                print("  ⚠ O salário deve ser maior que zero.")
+                continue
+            return valor, "informado pelo usuário"
+        except ValueError:
+            print("  ⚠ Valor inválido. Digite um número.")
+
+
+def main():
+    """Ponto de entrada da CLI."""
     print("=" * 55)
+    print("  CALCULADORA DE CESTA BÁSICA vs. SALÁRIO MÍNIMO")
+    print("=" * 55)
+
+    # Tenta exibir o "boletim" do BCB no início (informativo)
+    try:
+        salario_info = buscar_salario_minimo_atual()
+        ipca_info = buscar_inflacao_12_meses()
+        print()
+        print(formatar_dados_bcb(salario_info, ipca_info))
+    except ApiBcbError as e:
+        print(f"\n⚠ Não foi possível buscar dados do BCB: {e}")
+        print("  A aplicação continuará funcionando normalmente.")
+
+    # 1) Salário
+    salario, fonte = obter_salario(usar_api=True)
+
+    # 2) Preços dos itens
+    itens = coletar_precos()
+    valor_total = sum(itens.values())
+
+    # 3) Cálculo e exibição
+    percentual = calcular_percentual(valor_total, salario)
+    emoji, status, mensagem = classificar_risco(percentual)
+
+    print("\n" + "=" * 55)
     print("  RESULTADO")
     print("=" * 55)
-    print(f"  Valor total da cesta:  R$ {valor_total:.2f}")
-    print(f"  Salário mínimo:        R$ {salario:.2f}")
-    print(f"  Comprometimento:       {percentual}%")
+    print(f"  Valor total da cesta:   R$ {valor_total:.2f}")
+    print(f"  Salário mínimo:         R$ {salario:.2f}  ({fonte})")
+    print(f"  Comprometimento:        {percentual}%")
     print("-" * 55)
+    print(f"  {emoji} {status}: {mensagem}")
 
-    if percentual > 50:
-        print("  🔴 CRÍTICO: A cesta consome mais da metade do salário!")
-    elif percentual > 30:
-        print("  🟡 ALERTA: O custo está acima do recomendado (30%).")
-    else:
-        print("  🟢 OK: O custo está dentro de uma margem segura.")
-
-    sugestoes = gerar_sugestoes(itens_precos, salario)
+    # 4) Sugestões
+    sugestoes = gerar_sugestoes(itens, salario)
     if sugestoes:
-        print()
-        print("  💡 Sugestões para reduzir gastos:")
+        print("\n  💡 Sugestões para reduzir o gasto:")
         for s in sugestoes:
-            print(s)
+            print(f"     • {s}")
 
-    print()
     print("=" * 55)
 
 

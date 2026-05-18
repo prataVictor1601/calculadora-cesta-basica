@@ -1,6 +1,10 @@
 name: Python CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main, master, entrega-intermediaria ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
   build:
@@ -21,10 +25,10 @@ jobs:
 
       - name: Run Lint (Análise Estática)
         run: |
-          flake8 src tests --count --show-source --statistics
+          flake8 src tests --count --max-line-length=120 --show-source --statistics
 
       - name: Run Tests
         env:
-          PYTHONPATH: ${{ github.workspace }}
+          PYTHONPATH: .
         run: |
           pytest -v
